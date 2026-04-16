@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    data_drain (0.5.0)
+    data_drain (0.5.1)
       activemodel (>= 6.0)
       aws-sdk-glue (~> 1.0)
       aws-sdk-s3 (~> 1.114)

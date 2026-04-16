@@ -206,5 +206,23 @@ RSpec.describe DataDrain::Record do
       expect(path).to include("year=2026")
       expect(path).to include("month=3")
     end
+
+    it "usa wildcard cuando falta una partition key" do
+      path = record_class.send(:build_query_path, { year: 2026 })
+      expect(path).to include("year=2026")
+      expect(path).to include("month=*")
+    end
+
+    it "usa wildcards para todas las partition keys faltantes" do
+      path = record_class.send(:build_query_path, {})
+      expect(path).to include("year=*")
+      expect(path).to include("month=*")
+    end
+
+    it "trata valor cero (falsy) como valor legitimo, no como ausente" do
+      path = record_class.send(:build_query_path, { year: 2026, month: 0 })
+      expect(path).to include("year=2026")
+      expect(path).to include("month=0")
+    end
   end
 end
