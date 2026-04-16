@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-16
+
+### Features
+
+- Nueva opción `purge_where_clause` en `Engine#initialize`. Permite especificar una condición SQL independiente para el DELETE, distinta de `where_clause` (que aplica a export/verify). Caso de uso: archivar subset (`isp_id IS NOT NULL`) pero purgar superset (todo el rango). Valores: `nil` = no purge, `""` = purge todo el rango, `"x"` = rango AND x. Backwards compatible vía `fetch(:purge_where_clause, @where_clause)`. Fixes #3.
+
+### Refactor
+
+- Extraído helper `date_range_sql` en Engine para eliminar duplicación entre `base_where_sql` y `purge_where_sql`.
+
+### YARD
+
+- Documentación actualizada en `Engine#initialize` para los tres casos de `purge_where_clause`.
+- `Engine#build_delete_sql` ahora documenta retorno `String|nil`.
+
+### Telemetry
+
+- Nuevo evento `engine.purge_skipped` cuando no hay cláusula de purge (`delete_sql.nil?`).
+
+### Tests
+
+- 5 nuevos tests para `purge_where_clause`: backwards compatible, empty string purge all, integrity usa base_where_sql, independiente de where_clause, y use case primario (archive subset / purge superset).
+
 ## [0.5.2] - 2026-04-16
 
 ### Correcciones

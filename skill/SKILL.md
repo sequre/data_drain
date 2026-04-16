@@ -14,6 +14,7 @@ Skill de conocimiento completo sobre DataDrain. Consultame para cualquier pregun
 - **Hive Partitioning** — Estructura de carpetas `key1=val1/key2=val2/...` que DuckDB genera y consume nativamente para prefix scans eficientes.
 - **Semi-abierto** — Convención de rangos `[start, end)` con `<` (no `<=`) para evitar pérdida de microsegundos en límites de fecha.
 - **skip_export** — Modo del Engine donde delega export a herramienta externa (Glue/EMR) y solo verifica + purga.
+- **purge_where_clause** — Condición SQL independiente para el DELETE. Permite archivar subset y purgar superset. nil = skip, "" = purge todo el rango, "x" = rango AND x.
 - **ensure_job** — Wrapper idempotente de GlueRunner que crea o actualiza un job según config deseada. Incluye diffing de configuración para evitar API calls innecesarios.
 - **changed_fields** — Helper privado de ensure_job que compara config deseada vs actual de un Glue Job y retorna qué campos difieren.
 - **Heartbeat** — Log de progreso emitido cada 100 lotes en purgas masivas (tablas 1TB).
@@ -70,7 +71,7 @@ DataDrain resuelve el ciclo de vida de datos históricos en bases relacionales c
 
 - Ruby `>= 3.2.0`
 - Runtime: `activemodel >= 6.0`, `duckdb ~> 1.4`, `pg >= 1.2`, `aws-sdk-s3 ~> 1.114`, `aws-sdk-glue ~> 1.0`
-- Versión actual: `0.5.1`
+- Versión actual: `0.6.0`
 
 ## API Pública (resumen)
 
@@ -98,11 +99,21 @@ DataDrain::Engine.new(
   bucket:, start_date:, end_date:, table_name:,
   partition_keys: %w[isp_id year month],
   primary_key: "id",            # opcional
-  where_clause: nil,             # opcional, SQL extra
+  where_clause: nil,             # opcional, SQL extra para export/verify
+  purge_where_clause: nil,       # opcional, SQL para DELETE (nil=skip, ""=full range, "x"=range+x)
   skip_export: false,            # true delega export a Glue
   folder_name: nil,              # default = table_name
   select_sql: "*"                # default
 ).call  # => true (ok) | false (integrity fail)
+
+# Purge subset vs archive superset (v0.6.0+)
+DataDrain::Engine.new(
+  bucket:, start_date:, end_date:, table_name:,
+  partition_keys: %w[year month],
+  where_clause: "isp_id IS NOT NULL",  # filtra qué se archiva
+  purge_where_clause: ""               # purge TODO el rango (vacío = sin filtro adicional)
+).call
+# Resultado: export/verify sobre isp_id NOT NULL, purge sobre todo el rango
 
 # 2. Ingesta de archivos crudos
 DataDrain::FileIngestor.new(

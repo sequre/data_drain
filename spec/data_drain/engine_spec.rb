@@ -386,7 +386,9 @@ RSpec.describe DataDrain::Engine do
 
       allow(mock_pg_conn).to receive(:exec).with(/SET idle_in_transaction_session_timeout/)
       allow(mock_pg_result).to receive(:cmd_tuples).and_return(5, 0)
-      expect(mock_pg_conn).to receive(:exec).with(/DELETE FROM versions.*status = 'deleted'/m).twice.and_return(mock_pg_result)
+      expect(mock_pg_conn).to receive(:exec)
+        .with(/DELETE FROM versions.*status = 'deleted'/m).twice
+        .and_return(mock_pg_result)
 
       expect(engine.call).to be true
     end
@@ -429,7 +431,9 @@ RSpec.describe DataDrain::Engine do
 
       allow(mock_pg_conn).to receive(:exec).with(/SET idle_in_transaction_session_timeout/)
       allow(mock_pg_result).to receive(:cmd_tuples).and_return(5, 0)
-      expect(mock_pg_conn).to receive(:exec).with(/DELETE FROM versions.*status = 'deleted'/m).twice.and_return(mock_pg_result)
+      expect(mock_pg_conn).to receive(:exec)
+        .with(/DELETE FROM versions.*status = 'deleted'/m).twice
+        .and_return(mock_pg_result)
 
       expect(engine.call).to be true
     end
