@@ -74,7 +74,13 @@ RSpec.describe DataDrain::Engine do
   end
 
   it "skip_export omite export_to_parquet pero ejecuta verify_integrity" do
-    engine = described_class.new(base_options.merge(table_name: "versions", skip_export: true))
+    engine = described_class.new(
+      base_options.merge(
+        table_name: "versions",
+        skip_export: true,
+        purge_where_clause: "created_at >= '2026-03-01'"
+      )
+    )
     allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
     allow(mock_duckdb).to receive(:query).with(/SELECT row_count FROM postgres_query/).and_return([[100]])
     allow(mock_duckdb).to receive(:query).with(/FROM read_parquet/).and_return([[100]])
@@ -86,7 +92,8 @@ RSpec.describe DataDrain::Engine do
   end
 
   it "setea idle_in_transaction_session_timeout = 0" do
-    engine = described_class.new(base_options.merge(table_name: "versions"))
+    engine = described_class.new(base_options.merge(table_name: "versions",
+                                                    purge_where_clause: "created_at >= '2026-03-01'"))
     allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
     allow(mock_duckdb).to receive(:query).with(/SELECT row_count FROM postgres_query/).and_return([[100]])
     allow(mock_duckdb).to receive(:query).with(/COPY \(/)
@@ -115,7 +122,8 @@ RSpec.describe DataDrain::Engine do
   end
 
   it "loop de purge termina cuando cmd_tuples devuelve 0" do
-    engine = described_class.new(base_options.merge(table_name: "versions"))
+    engine = described_class.new(base_options.merge(table_name: "versions",
+                                                    purge_where_clause: "created_at >= '2026-03-01'"))
     allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
     allow(mock_duckdb).to receive(:query).with(/SELECT row_count FROM postgres_query/).and_return([[100]])
     allow(mock_duckdb).to receive(:query).with(/COPY \(/)
@@ -136,6 +144,9 @@ RSpec.describe DataDrain::Engine do
   end
 
   it "ejecuta el flujo ETL completo si la integridad es exitosa" do
+    engine = described_class.new(base_options.merge(table_name: "versions",
+                                                    purge_where_clause: "created_at >= '2026-03-01'"))
+
     # 1. Setup
     expect(mock_duckdb).to receive(:query).with(/INSTALL postgres/).ordered
     allow(mock_duckdb).to receive(:query).with(/SET max_memory/)
@@ -196,7 +207,8 @@ RSpec.describe DataDrain::Engine do
 
     it "ejecuta VACUUM ANALYZE cuando vacuum_after_purge es true y hay deletes" do
       DataDrain.configure { |c| c.vacuum_after_purge = true }
-      engine = described_class.new(base_options.merge(table_name: "versions"))
+      engine = described_class.new(base_options.merge(table_name: "versions",
+                                                      purge_where_clause: "created_at >= '2026-03-01'"))
 
       allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
       allow(mock_duckdb).to receive(:query).with(/SELECT row_count FROM postgres_query/).and_return([[100]])
@@ -314,6 +326,112 @@ RSpec.describe DataDrain::Engine do
       engine.call
     ensure
       DataDrain.reset_configuration!
+    end
+  end
+
+  describe "purge_where_clause" do
+    let(:base_options_with_purge) do
+      {
+        bucket: bucket,
+        start_date: Time.new(2026, 3, 1),
+        end_date: Time.new(2026, 3, 31),
+        partition_keys: %w[year month],
+        table_name: "versions",
+        where_clause: "isp_id IS NOT NULL"
+      }
+    end
+
+    it "purges using where_clause when purge_where_clause not provided (backwards compatible)" do
+      engine = described_class.new(base_options_with_purge)
+
+      allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
+      allow(mock_duckdb).to receive(:query).with(/SELECT row_count FROM postgres_query/).and_return([[10]])
+      allow(mock_duckdb).to receive(:query).with(/COPY \(/)
+      allow(mock_duckdb).to receive(:query).with(/FROM read_parquet/).and_return([[10]])
+      allow(mock_pg_conn).to receive(:exec).with(/SET idle_in_transaction_session_timeout/)
+
+      expect(mock_pg_conn).to receive(:exec).with(/DELETE FROM versions/).twice.and_return(mock_pg_result)
+      allow(mock_pg_result).to receive(:cmd_tuples).and_return(10, 0)
+
+      expect(engine.call).to be true
+    end
+
+    it "purges all when purge_where_clause is empty (no extra filter)" do
+      engine = described_class.new(
+        base_options_with_purge.merge(purge_where_clause: "")
+      )
+
+      allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
+      allow(mock_duckdb).to receive(:query).with(/SELECT row_count FROM postgres_query/).and_return([[10]])
+      allow(mock_duckdb).to receive(:query).with(/COPY \(/)
+      allow(mock_duckdb).to receive(:query).with(/FROM read_parquet/).and_return([[10]])
+
+      allow(mock_pg_conn).to receive(:exec).with(/SET idle_in_transaction_session_timeout/)
+      allow(mock_pg_result).to receive(:cmd_tuples).and_return(10, 0)
+      expect(mock_pg_conn).to receive(:exec).with(/DELETE FROM versions/).twice.and_return(mock_pg_result)
+
+      expect(engine.call).to be true
+    end
+
+    it "integrity check uses base_where_sql, not purge_where_clause" do
+      engine = described_class.new(
+        base_options_with_purge.merge(purge_where_clause: "status = 'deleted'")
+      )
+
+      allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
+      expect(mock_duckdb).to receive(:query).with(/isp_id IS NOT NULL/).at_least(:once).and_return([[10]])
+      expect(mock_duckdb).not_to receive(:query).with(/status = 'deleted'/)
+      allow(mock_duckdb).to receive(:query).with(/COPY \(/)
+      allow(mock_duckdb).to receive(:query).with(/FROM read_parquet/).and_return([[10]])
+
+      allow(mock_pg_conn).to receive(:exec).with(/SET idle_in_transaction_session_timeout/)
+      allow(mock_pg_result).to receive(:cmd_tuples).and_return(5, 0)
+      expect(mock_pg_conn).to receive(:exec).with(/DELETE FROM versions.*status = 'deleted'/m).twice.and_return(mock_pg_result)
+
+      expect(engine.call).to be true
+    end
+
+    it "archives subset but purges superset (primary use case)" do
+      engine = described_class.new(
+        base_options_with_purge.merge(
+          where_clause: "isp_id IS NOT NULL",
+          purge_where_clause: ""
+        )
+      )
+
+      allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
+      expect(mock_duckdb).to receive(:query).with(/isp_id IS NOT NULL/).at_least(:once).and_return([[10]])
+      allow(mock_duckdb).to receive(:query).with(/COPY \(/)
+      allow(mock_duckdb).to receive(:query).with(/FROM read_parquet/).and_return([[10]])
+
+      allow(mock_pg_conn).to receive(:exec).with(/SET idle_in_transaction_session_timeout/)
+      allow(mock_pg_result).to receive(:cmd_tuples).and_return(10, 0)
+      expect(mock_pg_conn).to receive(:exec).with(/DELETE FROM versions/).twice do |sql|
+        expect(sql).not_to include("isp_id IS NOT NULL")
+        mock_pg_result
+      end
+
+      expect(engine.call).to be true
+    end
+
+    it "purge_where_clause independent of where_clause" do
+      engine = described_class.new(
+        base_options_with_purge.merge(
+          where_clause: "isp_id IS NOT NULL",
+          purge_where_clause: "status = 'deleted'"
+        )
+      )
+
+      allow(mock_duckdb).to receive(:query).with(/INSTALL postgres|SET max_memory|SET temp_directory|ATTACH/)
+      allow(mock_duckdb).to receive(:query).with(/SELECT row_count FROM postgres_query/).and_return([[10]])
+      allow(mock_duckdb).to receive(:query).with(/COPY \(/)
+      allow(mock_duckdb).to receive(:query).with(/FROM read_parquet/).and_return([[10]])
+
+      allow(mock_pg_conn).to receive(:exec).with(/SET idle_in_transaction_session_timeout/)
+      allow(mock_pg_result).to receive(:cmd_tuples).and_return(5, 0)
+      expect(mock_pg_conn).to receive(:exec).with(/DELETE FROM versions.*status = 'deleted'/m).twice.and_return(mock_pg_result)
+
+      expect(engine.call).to be true
     end
   end
 end

@@ -104,6 +104,26 @@ DataDrain::Engine.new(
 ).call
 ```
 
+### Purge subset vs archive superset
+
+Caso común: archivar filas válidas (`isp_id IS NOT NULL`) pero borrar superset (válidas + trash).
+
+```ruby
+# Archiva solo isp_id NOT NULL, verifica integridad solo sobre esos,
+# pero purga TODO el mes (NULL + NOT NULL) con batching/throttling/vacuum
+DataDrain::Engine.new(
+  bucket:             'my-bucket-store',
+  start_date:         6.months.ago.beginning_of_month,
+  end_date:           6.months.ago.end_of_month,
+  table_name:         'versions',
+  partition_keys:     %w[year month],
+  where_clause:       'isp_id IS NOT NULL',  # filtra qué se archiva
+  purge_where_clause: ''                       # purge TODO el mes (vacío = sin filtro adicional)
+).call
+```
+
+**Resultado:** Export/verify cuentan y comparan solo `isp_id NOT NULL`. Purge borra el mes completo con batching, throttling y vacuum del `purge_loop`.
+
 ### Orquestación con AWS Glue (tablas 1TB+)
 
 ```ruby

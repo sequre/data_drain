@@ -21,7 +21,16 @@ module DataDrain
     # @option options [String] :select_sql (Opcional) Sentencia SELECT personalizada.
     # @option options [Array<String, Symbol>] :partition_keys Columnas para particionar.
     # @option options [String] :primary_key (Opcional) Clave primaria para borrado. Por defecto 'id'.
-    # @option options [String] :where_clause (Opcional) Condición SQL extra.
+    # @option options [String] :where_clause (Opcional) Condición SQL extra
+    #   que filtra export, count e integrity check. Define "qué se archiva".
+    # @option options [String] :purge_where_clause (Opcional) Condición SQL
+    #   para el DELETE. Si se omite, usa :where_clause (backwards compatible).
+    #   Pasar nil explícito para desactivar purga. Pasar '' (vacío) para purgar
+    #   todo el rango de fechas sin filtro adicional (útil para archivar subset
+    #   y borrar superset).
+    #   Puede ser más amplia que :where_clause; filas que matchean
+    #   :purge_where_clause pero no :where_clause se borran sin archivar ni
+    #   verificar. Útil para limpieza de orphans/trash que no debe respaldarse.
     # @option options [Boolean] :skip_export (Opcional) Si true, no exporta
     #   a Parquet — solo valida y purga (para uso con GlueRunner).
     def initialize(options)
@@ -38,6 +47,7 @@ module DataDrain
       @primary_key = options.fetch(:primary_key, "id")
       Validations.validate_identifier!(:primary_key, @primary_key)
       @where_clause = options[:where_clause]
+      @purge_where_clause = options.fetch(:purge_where_clause, @where_clause)
       @bucket = options[:bucket]
       @skip_export = options.fetch(:skip_export, false)
 
@@ -140,9 +150,25 @@ module DataDrain
     # @api private
     # @return [String]
     def base_where_sql
-      sql = "created_at >= '#{@start_date.to_fs(:db)}' AND created_at < '#{@end_date.to_fs(:db)}'"
+      sql = date_range_sql
       sql += " AND #{@where_clause}" if @where_clause && !@where_clause.empty?
       sql
+    end
+
+    # @api private
+    # @return [String]
+    def purge_where_sql
+      return nil if @purge_where_clause.nil?
+
+      sql = date_range_sql
+      sql += " AND #{@purge_where_clause}" unless @purge_where_clause.empty?
+      sql
+    end
+
+    # @api private
+    # @return [String]
+    def date_range_sql
+      "created_at >= '#{@start_date.to_fs(:db)}' AND created_at < '#{@end_date.to_fs(:db)}'"
     end
 
     # @api private
@@ -289,13 +315,19 @@ module DataDrain
     # @param conn [PG::Connection]
     # @return [Integer] total de filas borradas
     def purge_loop(conn)
+      delete_sql = build_delete_sql
+      if delete_sql.nil?
+        safe_log(:info, "engine.purge_skipped", { table: @table_name, reason: "no_purge_clause" })
+        return 0
+      end
+
       batches_processed = 0
       total_deleted = 0
       slow_batch_streak = 0
 
       loop do
         batch_start = monotonic
-        result = conn.exec(build_delete_sql)
+        result = conn.exec(delete_sql)
         batch_duration = monotonic - batch_start
         count = result.cmd_tuples
         break if count.zero?
@@ -349,12 +381,16 @@ module DataDrain
     end
 
     # @api private
+    # @return [String, nil] SQL DELETE statement or nil if no purge clause
     def build_delete_sql
+      where = purge_where_sql
+      return nil if where.nil?
+
       <<~SQL
         DELETE FROM #{@table_name}
         WHERE #{@primary_key} IN (
           SELECT #{@primary_key} FROM #{@table_name}
-          WHERE #{base_where_sql}
+          WHERE #{where}
           LIMIT #{@config.batch_size}
         )
       SQL
