@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.5.2] - 2026-04-16
+
+### Correcciones
+
+- `Record#where()` ahora usa wildcards (`key=*`) para partition keys no especificadas, en lugar de valores vacíos (`key=`). Consistente con `destroy_partitions`. Fixes #1.
+
 ## [0.5.1] - 2026-04-15
 
 ### Docs
