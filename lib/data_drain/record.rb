@@ -131,7 +131,10 @@ module DataDrain
       # @param partitions [Hash]
       # @return [String]
       def build_query_path(partitions)
-        partition_path = partition_keys.map { |k| "#{k}=#{partitions[k.to_sym] || partitions[k.to_s]}" }.join("/")
+        partition_path = partition_keys.map do |k|
+          val = partitions.key?(k.to_sym) ? partitions[k.to_sym] : partitions[k.to_s]
+          val.nil? || val.to_s.empty? ? "#{k}=*" : "#{k}=#{val}"
+        end.join("/")
         DataDrain::Storage.adapter.build_path(bucket, folder_name, partition_path)
       end
 
