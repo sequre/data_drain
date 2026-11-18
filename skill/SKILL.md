@@ -179,6 +179,10 @@ Detalle completo de firmas, parámetros, retornos y comportamientos en [API Deta
 
 `Engine#call` retorna `false` y **no ejecuta la purga**. Emite log `engine.integrity_error`. Si la falla viene de no poder leer el Parquet (`DuckDB::Error`), emite `engine.parquet_read_error` y también retorna `false`. Es la única salvaguarda matemática del sistema.
 
+### ¿Se puede reintentar una exportación?
+
+Sí. `Engine` y `FileIngestor` escriben el Parquet con `OVERWRITE_OR_IGNORE 1` (`lib/data_drain/engine.rb:219`, `lib/data_drain/file_ingestor.rb:122`), así que volver a correr el mismo período reescribe las mismas particiones en vez de duplicarlas.
+
 ### ¿Cómo cambiar `storage_mode` en runtime?
 
 ```ruby
