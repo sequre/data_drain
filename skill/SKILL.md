@@ -181,7 +181,9 @@ Detalle completo de firmas, parámetros, retornos y comportamientos en [API Deta
 
 ### ¿Se puede reintentar una exportación?
 
-Sí. `Engine` y `FileIngestor` escriben el Parquet con `OVERWRITE_OR_IGNORE 1` (`lib/data_drain/engine.rb:219`, `lib/data_drain/file_ingestor.rb:122`), así que volver a correr el mismo período reescribe las mismas particiones en vez de duplicarlas.
+Sólo si la corrida falló **antes de la purga**. `Engine#export_to_parquet` y `FileIngestor#step_export` escriben con `OVERWRITE_OR_IGNORE 1`, así que volver a exportar el mismo período reescribe las mismas particiones.
+
+**Con la purga empezada, no reintentes.** `purge_loop` borra por lotes y cada lote queda confirmado, así que una falla a mitad deja el período borrado en parte. Un reintento exporta sólo las filas que quedan en Postgres, y entonces el Parquet y el conteo de `verify_integrity` dejan de representar el período completo. Ese caso se revisa a mano.
 
 ### ¿Cómo cambiar `storage_mode` en runtime?
 
@@ -204,7 +206,7 @@ Sí. `Record.connection` mantiene una conexión por thread vía `Thread.current`
 
 ### ¿DataDrain valida los nombres de tabla?
 
-No. `table_name`, `select_sql` y `where_clause` se interpolan directamente en SQL. La gema asume que estos valores vienen de código de aplicación (no de input de usuario). En `Record.find` el `id` sí se sanitiza (escape de comillas simples).
+Sí, los identificadores. `Engine#initialize` valida `table_name` y `primary_key`, y `FileIngestor#initialize` valida `folder_name`, con `DataDrain::Validations::IDENTIFIER_REGEX` (`\A[a-zA-Z_][a-zA-Z0-9_]*\z`). Si no matchea, levanta `DataDrain::ConfigurationError`: un `"public.events"` o un nombre con `-`, `.`, `;`, espacios o comillas no pasa. `select_sql` y `where_clause` **no** se validan: se interpolan directamente en SQL, así que tienen que venir de código de aplicación, no de input de usuario. En `Record.find` el `id` sí se sanitiza (escape de comillas simples).
 
 ### ¿Cómo evito OOM con tablas grandes?
 
