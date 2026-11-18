@@ -234,7 +234,7 @@ DataDrain::Engine.new(
 
 **Razón:** `select_sql` y `where_clause` se interpolan **directamente en SQL** (no son prepared statements). Input de usuario abre vector de SQL injection.
 
-**Nota:** `table_name` y `primary_key` se validan con regex `\A[a-zA-Z_][a-zA-Z0-9_]*\z` en `Engine#initialize`. Si el valor no matchea, levantan `DataDrain::ConfigurationError`. `select_sql` y `where_clause` siguen siendo trusted (no se validan).
+**Nota:** `table_name` y `primary_key` (en `Engine#initialize`) y `folder_name` (en `FileIngestor#initialize`) se validan con regex `\A[a-zA-Z_][a-zA-Z0-9_]*\z`. Si el valor no matchea, levantan `DataDrain::ConfigurationError`. `select_sql` y `where_clause` siguen siendo trusted (no se validan).
 
 **Alternativa:** `table_name` y `primary_key` ahora están protegidos contra injection trivial. `select_sql` y `where_clause` deben venir de código de aplicación (constantes, configuración, jobs con valores fijos).
 
